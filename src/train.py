@@ -205,7 +205,7 @@ class ProjectAgent(dqn_agent):
         # if len(args)!=0 or len(args)!=0:
         super().__init__(*args,**kwargs)
         self.model_loaded = False
-        self.model_save_path = 'model_dqn0.pt'
+        self.model_save_path = 'src/model_dqn0.pt'
         self.action_taken = {0: 0, 1: 0, 2: 0, 3: 0}
         
 
