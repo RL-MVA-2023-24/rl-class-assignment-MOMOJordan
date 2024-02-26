@@ -1,16 +1,9 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-
-import numpy as np
-from tqdm import tqdm
-
-from sklearn.ensemble import RandomForestRegressor
-
-import matplotlib.pyplot as plt
 import random
 import numpy as np
 import torch
-import torch.nn as nn
+
 from copy import deepcopy
 
 env = TimeLimit(
