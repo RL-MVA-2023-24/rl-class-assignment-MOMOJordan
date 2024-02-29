@@ -11,55 +11,56 @@ from evaluate import *
 import torch
 import torch.nn as nn
 def objective(trial,env, **kwargs):
-    n_splits = 4
+
     try:
 
-        param_grid = {
-            # "device_type": trial.suggest_categorical("device_type", ['gpu']),
-            'objective': 'multiclass',
-            'num_class': 3,
-            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 50, 1000, step=50),
-            # "min_data_in_bin":trial.suggest_int("min_data_in_leaf", 1, 200, step=50),
-            # "lambda_l1": trial.suggest_float("lambda_l1", 0, 10),
-            # "lambda_l2": trial.suggest_int("lambda_l2", 0, 100, step=5),
-            "min_gain_to_split": trial.suggest_float("min_gain_to_split", 0.01, 10),
-            'num_leaves': trial.suggest_int('num_leaves', 10, 1000),  # Adjusted for the smaller dataset
-            'learning_rate': trial.suggest_loguniform('learning_rate', 0.005, 0.5),  # Adjusted for smaller dataset
-            'max_depth': trial.suggest_int('max_depth', 5, 16),
-            'min_child_samples': trial.suggest_int('min_child_samples', 40, 100),
-            'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-5, 1),
-            'n_estimators': trial.suggest_int('n_estimators', 20, 1000,step=10),
-            # 'random_state': 42
-        }
+        config = {
+                  'nb_actions': env.action_space.n,
+                  'learning_rate': trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True),
+                  'gamma': trial.suggest_float('gamma', 0.9, 0.999),
+                  'buffer_size': trial.suggest_int('buffer_size', 100000, 1000000),
+                  'epsilon_min': 0.01,
+                  'epsilon_max': 1.,
+                  'epsilon_decay_period': 1000,
+                  'epsilon_delay_decay': 20,
+                  'batch_size': trial.suggest_int('batch_size', 16, 128),
+                  'nb_neurons': trial.suggest_int('nb_neurons', 8, 256)
+                  }
 
-        device = torch.device("cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Declare network
         state_dim = env.observation_space.shape[0]
         n_action = env.action_space.n
-        nb_neurons = 20
+        nb_neurons = config['nb_neurons']
         DQN = torch.nn.Sequential(nn.Linear(state_dim, nb_neurons),
+                                  nn.ReLU(),
+                                  nn.Linear(nb_neurons, nb_neurons),
                                   nn.ReLU(),
                                   nn.Linear(nb_neurons, nb_neurons),
                                   nn.ReLU(),
                                   nn.Linear(nb_neurons, n_action)).to(device)
 
-        agent = ProjectAgent(param_grid, DQN)
-        _, _, _, _ = agent.train(env, 50)
+        # DQN config
+        
+
+        # Train agent
+        agent = ProjectAgent(config, DQN)
+        scores = agent.train(env, 1)
 
         # Keep the following lines to evaluate your agent unchanged.
         score_agent: float = evaluate_HIV(agent=agent, nb_episode=1)
-        score_agent_dr: float = evaluate_HIV_population(agent=agent, nb_episode=15)
+        score_agent_dr: float = evaluate_HIV_population(agent=agent, nb_episode=2)
 
-        return score_agent+score_agent_dr
+        return score_agent+score_agent_dr/2
+
 
     except Exception as e:
         raise optuna.exceptions.TrialPruned(f'Skipping this trial due to an error: {str(e)}')
 
 
 
-def run_study(X_train,Y_train, n_trials=10, n_jobs=2, **kwargs):
-    env = TimeLimit(
-        env=HIVPatient(domain_randomization=False), max_episode_steps=10
-    )
+def run_study(env, n_trials=10, n_jobs=2, **kwargs):
+
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda trial: objective(trial, env,**kwargs), n_trials=n_trials, n_jobs=n_jobs)
 

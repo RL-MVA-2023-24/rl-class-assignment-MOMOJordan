@@ -3,11 +3,12 @@ from env_hiv import HIVPatient
 import random
 import numpy as np
 import torch
-
+import torch.nn as nn
 from copy import deepcopy
+from evaluate import evaluate_HIV, evaluate_HIV_population
 
 env = TimeLimit(
-    env=HIVPatient(domain_randomization=False), max_episode_steps=10
+    env=HIVPatient(domain_randomization=False), max_episode_steps=200
 )  # The time wrapper limits the number of steps in an episode at 200.
 
 
@@ -19,8 +20,6 @@ class ReplayBuffer:
         self.data = []
         self.index = 0  # index of the next cell to be filled
         self.device = device
-
-
 
     def append(self, s, a, r, s_, d):
         if len(self.data) < self.capacity:
@@ -36,18 +35,23 @@ class ReplayBuffer:
         return len(self.data)
 
 
-def greedy_action_dqn(network, state):
-    device =  "cpu"
-    with torch.no_grad():
+def greedy_action_dqn(network, state, device="cpu"):
+
+    with (torch.no_grad()):
         Q = network(torch.Tensor(state).unsqueeze(0).to(device))
+        # Q += Q.abs().std() * torch.randn_like(Q) * 0.1
         return torch.argmax(Q).item()
 
-class dqn_agent():
-    def __init__(self, config={'1':1}, model=None):
+
+class dqn_agent:
+    def __init__(self, config={'1': 1}, model=None):
         super().__init__()
-        self.config=config
+        self.patience=15
+        self.early_stop=0
+        self.best_score=-np.inf
+        self.config = config
         device = "cpu"
-        self.device=device
+        self.device = device
         self.nb_actions = config['nb_actions'] if 'nb_actions' in config else 0
         self.gamma = config['gamma'] if 'gamma' in config.keys() else 0.95
         self.batch_size = config['batch_size'] if 'batch_size' in config.keys() else 100
@@ -62,7 +66,8 @@ class dqn_agent():
         self.target_model = deepcopy(self.model).to(device) if model is not None else None
         self.criterion = config['criterion'] if 'criterion' in config.keys() else torch.nn.MSELoss()
         lr = config['learning_rate'] if 'learning_rate' in config.keys() else 0.001
-        self.optimizer = None if model is None else config['optimizer'] if 'optimizer' in config.keys() else torch.optim.Adam(
+        self.optimizer = None if model is None else config[
+            'optimizer'] if 'optimizer' in config.keys() else torch.optim.Adam(
             self.model.parameters(), lr=lr)
         self.nb_gradient_steps = config['gradient_steps'] if 'gradient_steps' in config.keys() else 1
         self.update_target_strategy = config[
@@ -71,7 +76,7 @@ class dqn_agent():
         self.update_target_tau = config['update_target_tau'] if 'update_target_tau' in config.keys() else 0.005
         self.monitoring_nb_trials = config['monitoring_nb_trials'] if 'monitoring_nb_trials' in config.keys() else 0
 
-        self.seed=config.get('seed',123456789)
+        self.seed = config.get('seed', 123456789)
 
         random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -79,44 +84,6 @@ class dqn_agent():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         np.random.seed(self.seed)
-
-    def set_seed(self):
-        random.seed(self.seed)
-        torch.manual_seed(self.seed)
-        torch.cuda.manual_seed(self.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        np.random.seed(self.seed)
-
-    def MC_eval(self, env, nb_trials):  # NEW NEW NEW
-        MC_total_reward = []
-        MC_discounted_reward = []
-        for _ in range(nb_trials):
-            x, _ = env.reset()
-            done = False
-            trunc = False
-            total_reward = 0
-            discounted_reward = 0
-            step = 0
-            while not (done or trunc):
-                a = greedy_action_dqn(self.model, x)
-                y, r, done, trunc, _ = env.step(a)
-                x = y
-                total_reward += r
-                discounted_reward += self.gamma ** step * r
-                step += 1
-            MC_total_reward.append(total_reward)
-            MC_discounted_reward.append(discounted_reward)
-        return np.mean(MC_discounted_reward), np.mean(MC_total_reward)
-
-    def V_initial_state(self, env, nb_trials):  # NEW NEW NEW
-        with torch.no_grad():
-            for _ in range(nb_trials):
-                val = []
-                x, _ = env.reset()
-                val.append(self.model(torch.Tensor(x).unsqueeze(0).to(self.device)).max().item())
-        return np.mean(val)
-
     def gradient_step(self):
         if len(self.memory) > self.batch_size:
             X, A, R, Y, D = self.memory.sample(self.batch_size)
@@ -127,6 +94,9 @@ class dqn_agent():
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+
+            # for name, param in self.model.named_parameters():
+            #     print(f'Parameter: {name}, Gradient norm: {param.grad.norm()}')
 
     def train(self, env, max_episode):
         episode_return = []
@@ -142,6 +112,7 @@ class dqn_agent():
             # update epsilon
             if step > self.epsilon_delay:
                 epsilon = max(self.epsilon_min, epsilon - self.epsilon_step)
+                self.epsilon=epsilon
             # select epsilon-greedy action
             if np.random.rand() < epsilon:
                 action = env.action_space.sample()
@@ -168,22 +139,35 @@ class dqn_agent():
             # next transition
             step += 1
             if done or trunc:
+
+                if episode>100:
+
+                    score_agent=evaluate_HIV(agent=self, nb_episode=1)
+                else:
+                    score_agent=0
+
+                if score_agent>self.best_score:
+
+                    self.best_score=score_agent
+                    self.early_stop=0
+                else:
+                    self.early_stop+=1
+                # if self.early_stop>=self.patience:
+                #     print('early stopping')
+                #     return episode_return
+
+                if score_agent>=1e8:
+                    return episode_return
+
                 episode += 1
                 # Monitoring
                 if self.monitoring_nb_trials > 0:
-                    MC_dr, MC_tr = self.MC_eval(env, self.monitoring_nb_trials)  # NEW NEW NEW
-                    V0 = self.V_initial_state(env, self.monitoring_nb_trials)  # NEW NEW NEW
-                    MC_avg_total_reward.append(MC_tr)  # NEW NEW NEW
-                    MC_avg_discounted_reward.append(MC_dr)  # NEW NEW NEW
-                    V_init_state.append(V0)  # NEW NEW NEW
                     episode_return.append(episode_cum_reward)  # NEW NEW NEW
                     print("Episode ", '{:2d}'.format(episode),
                           ", epsilon ", '{:6.2f}'.format(epsilon),
                           ", batch size ", '{:4d}'.format(len(self.memory)),
                           ", ep return ", '{:4.1f}'.format(episode_cum_reward),
-                          ", MC tot ", '{:6.2f}'.format(MC_tr),
-                          ", MC disc ", '{:6.2f}'.format(MC_dr),
-                          ", V0 ", '{:6.2f}'.format(V0),
+                          ", real score ", '{:4.1f}'.format(score_agent),
                           sep='')
                 else:
                     episode_return.append(episode_cum_reward)
@@ -191,51 +175,24 @@ class dqn_agent():
                           ", epsilon ", '{:6.2f}'.format(epsilon),
                           ", batch size ", '{:4d}'.format(len(self.memory)),
                           ", ep return ", '{:4.1f}'.format(episode_cum_reward),
+                          ", real score ", '{:4.1f}'.format(score_agent),
                           sep='')
 
                 state, _ = env.reset()
                 episode_cum_reward = 0
             else:
                 state = next_state
-        return episode_return, MC_avg_discounted_reward, MC_avg_total_reward, V_init_state
-    
+        return episode_return
+
 class ProjectAgent(dqn_agent):
     def __init__(self, *args, **kwargs):
-        
+
         # if len(args)!=0 or len(args)!=0:
-        super().__init__(*args,**kwargs)
+        super().__init__(*args, **kwargs)
         self.model_loaded = False
-        self.model_save_path = 'src/model_dqn0.pt'
+        self.model_save_path = 'model_dqn0.pt'
         self.action_taken = {0: 0, 1: 0, 2: 0, 3: 0}
-        
 
-    def act(self, observation, use_random=False):
-        if not self.model_loaded:
-            self.load()
-            # agent_model=self.saved_agent.model
-            # agent_model.eval()
-        action_taken=greedy_action_dqn(self.saved_agent, observation)
-        self.action_taken[action_taken]+=1
-        print(self.action_taken)
-        return action_taken
-
-    def save(self, path='model_dqn0.pt'):
-        self.model_save_path = path
-        # torch.save(self.model.state_dict(), self.model_save_path)
-        torch.save({'config':self.config,'model':self.model}, self.model_save_path)
-        # pass
-
-    def load(self):
-        self.model_loaded = True
-        saved_result=torch.load(self.model_save_path,map_location=torch.device('cpu'))
-
-        for key, value in saved_result['config'].items():
-            try:
-                setattr(self, key, value)
-            except:
-                print(key,value)
-
-        # self.seed=self.config['seed']
         random.seed(self.seed)
         torch.manual_seed(self.seed)
         torch.cuda.manual_seed(self.seed)
@@ -243,8 +200,113 @@ class ProjectAgent(dqn_agent):
         torch.backends.cudnn.benchmark = False
         np.random.seed(self.seed)
 
-        self.saved_agent=saved_result['model']
+    def act(self, observation, use_random=True):
+        if self.model is None:
+            self.load()
+            # agent_model=self.saved_agent.model
+            # agent_model.eval()
+
+        # if use_random and random.random() < self.epsilon: # Epsilon-greedy exploration
+        #     action_taken = random.randint(0, self.nb_actions - 1)  # Random action
+        # else:
+        action_taken = greedy_action_dqn(self.model, observation)
+
+        self.action_taken[action_taken] += 1
+
+        if self.model_loaded:
+            print(self.action_taken)
+
+        return action_taken
+
+    def save(self, path='model_dqn0.pt'):
+        self.model_save_path = path
+        # torch.save(self.model.state_dict(), self.model_save_path)
+        torch.save({'config': self.config, 'model': self.model}, self.model_save_path)
+        # pass
+
+    def load(self):
+        self.model_loaded = True
+        saved_result = torch.load(self.model_save_path, map_location=torch.device('cpu'))
+
+        self.model = saved_result['model']
+        self.config = saved_result['config']
+
+        for key, value in saved_result['config'].items():
+            try:
+                setattr(self, key, value)
+            except:
+                print(key, value)
+
+        self.seed = self.config['seed']
+        random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        torch.cuda.manual_seed(self.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        np.random.seed(self.seed)
 
 
+if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cartpole = env
+    # Declare network
+    state_dim = cartpole.observation_space.shape[0]
+    n_action = cartpole.action_space.n
+
+    config = {'nb_actions': env.action_space.n,
+              'learning_rate': 0.001,
+              'gamma': 0.95, # 0.98 good
+              'buffer_size': int(1e5),
+              'epsilon_min': 0.02,
+              'epsilon_max': 1.,
+              'epsilon_decay_period': 20000,
+              'epsilon_delay_decay': 400,
+
+              'gradient_steps': 2,
+              'update_target_strategy': 'replace',  # or 'ema'
+              'update_target_freq': 400,
+              'update_target_tau': 0.005,
+              'criterion': torch.nn.SmoothL1Loss(),
+              'monitoring_nb_trials': 50,
+
+              'batch_size': 800,
+              'nb_neurons': 256,
+              'seed': 20,
+              }
+
+
+    # config = {'nb_actions': cartpole.action_space.n,
+    #           'epsilon_min': 0.001,
+    #           'epsilon_max': 1.,
+    #           'epsilon_decay_period': 1000,
+    #           'epsilon_delay_decay': 20,
+    #           'learning_rate': 0.075879071,
+    #           'gamma': 0.90,
+    #           'buffer_size': int(1e5),
+    #           'batch_size': 56,
+    #           'nb_neurons': 41,
+    #           'seed': 87482658,
+    #           }
+
+    nb_neurons = config['nb_neurons']
+
+    DQN = torch.nn.Sequential(nn.Linear(state_dim, 256),
+                              nn.ReLU(),
+                              nn.Linear(256, 256),
+                              nn.ReLU(),
+                              nn.Linear(256, 256),
+                              nn.ReLU(),
+                              nn.Linear(256, 256),
+                              nn.ReLU(),
+                              nn.Linear(256, 256),
+                              nn.ReLU(),
+                              nn.Linear(256, n_action)).to(device)
+
+    # Train agent
+    agent_best = ProjectAgent(config, DQN)
+
+    scores = agent_best.train(cartpole, 200)
+
+    agent_best.save()
 
 
