@@ -149,15 +149,14 @@ class dqn_agent:
                 if score_agent>self.best_score:
 
                     self.best_score=score_agent
-                    self.early_stop=0
-                else:
-                    self.early_stop+=1
-                # if self.early_stop>=self.patience:
-                #     print('early stopping')
-                #     return episode_return
+                    try:
+                        self.save()
+                    except:
+                        pass
 
-                if score_agent>=1e8:
-                    return episode_return
+
+                # if score_agent>=1e8:
+                #     return episode_return
 
                 episode += 1
                 # Monitoring
@@ -305,8 +304,8 @@ if __name__ == "__main__":
     # Train agent
     agent_best = ProjectAgent(config, DQN)
 
-    scores = agent_best.train(cartpole, 200)
+    scores = agent_best.train(cartpole, 250)
 
-    agent_best.save()
+    # agent_best.save()
 
 
