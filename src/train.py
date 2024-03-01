@@ -209,11 +209,11 @@ class ProjectAgent(dqn_agent):
         #     action_taken = random.randint(0, self.nb_actions - 1)  # Random action
         # else:
         action_taken = greedy_action_dqn(self.model, observation)
-
-        self.action_taken[action_taken] += 1
-
-        if self.model_loaded:
-            print(self.action_taken)
+        #
+        # self.action_taken[action_taken] += 1
+        #
+        # if self.model_loaded:
+        #     print(self.action_taken)
 
         return action_taken
 
@@ -270,7 +270,7 @@ if __name__ == "__main__":
 
               'batch_size': 800,
               'nb_neurons': 256,
-              'seed': 20,
+              'seed': 25,
               }
 
 
@@ -304,7 +304,7 @@ if __name__ == "__main__":
     # Train agent
     agent_best = ProjectAgent(config, DQN)
 
-    scores = agent_best.train(cartpole, 250)
+    scores = agent_best.train(cartpole, 210)
 
     # agent_best.save()
 
