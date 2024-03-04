@@ -95,14 +95,10 @@ class dqn_agent:
             loss.backward()
             self.optimizer.step()
 
-            # for name, param in self.model.named_parameters():
-            #     print(f'Parameter: {name}, Gradient norm: {param.grad.norm()}')
 
     def train(self, env, max_episode):
         episode_return = []
-        MC_avg_total_reward = []  # NEW NEW NEW
-        MC_avg_discounted_reward = []  # NEW NEW NEW
-        V_init_state = []  # NEW NEW NEW
+
         episode = 0
         episode_cum_reward = 0
         state, _ = env.reset()
@@ -142,7 +138,7 @@ class dqn_agent:
 
                 if episode>100:
 
-                    score_agent=evaluate_HIV(agent=self, nb_episode=1)
+                    score_agent=min(evaluate_HIV(agent=self, nb_episode=1), evaluate_HIV_population(agent=self, nb_episode=1))
                 else:
                     score_agent=0
 
@@ -162,20 +158,20 @@ class dqn_agent:
                 # Monitoring
                 if self.monitoring_nb_trials > 0:
                     episode_return.append(episode_cum_reward)  # NEW NEW NEW
-                    print("Episode ", '{:2d}'.format(episode),
-                          ", epsilon ", '{:6.2f}'.format(epsilon),
-                          ", batch size ", '{:4d}'.format(len(self.memory)),
-                          ", ep return ", '{:4.1f}'.format(episode_cum_reward),
-                          ", real score ", '{:4.1f}'.format(score_agent),
-                          sep='')
+                    # print("Episode ", '{:2d}'.format(episode),
+                    #       ", epsilon ", '{:6.2f}'.format(epsilon),
+                    #       ", batch size ", '{:4d}'.format(len(self.memory)),
+                    #       ", ep return ", '{:4.1f}'.format(episode_cum_reward),
+                    #       ", real score ", '{:4.1f}'.format(score_agent),
+                    #       sep='')
                 else:
                     episode_return.append(episode_cum_reward)
-                    print("Episode ", '{:2d}'.format(episode),
-                          ", epsilon ", '{:6.2f}'.format(epsilon),
-                          ", batch size ", '{:4d}'.format(len(self.memory)),
-                          ", ep return ", '{:4.1f}'.format(episode_cum_reward),
-                          ", real score ", '{:4.1f}'.format(score_agent),
-                          sep='')
+                    # print("Episode ", '{:2d}'.format(episode),
+                    #       ", epsilon ", '{:6.2f}'.format(epsilon),
+                    #       ", batch size ", '{:4d}'.format(len(self.memory)),
+                    #       ", ep return ", '{:4.1f}'.format(episode_cum_reward),
+                    #       ", real score ", '{:4.1f}'.format(score_agent),
+                    #       sep='')
 
                 state, _ = env.reset()
                 episode_cum_reward = 0
@@ -202,26 +198,14 @@ class ProjectAgent(dqn_agent):
     def act(self, observation, use_random=True):
         if self.model is None:
             self.load()
-            # agent_model=self.saved_agent.model
-            # agent_model.eval()
 
-        # if use_random and random.random() < self.epsilon: # Epsilon-greedy exploration
-        #     action_taken = random.randint(0, self.nb_actions - 1)  # Random action
-        # else:
         action_taken = greedy_action_dqn(self.model, observation)
-        #
-        # self.action_taken[action_taken] += 1
-        #
-        # if self.model_loaded:
-        #     print(self.action_taken)
 
         return action_taken
 
     def save(self, path='model_dqn0.pt'):
         self.model_save_path = path
-        # torch.save(self.model.state_dict(), self.model_save_path)
         torch.save({'config': self.config, 'model': self.model}, self.model_save_path)
-        # pass
 
     def load(self):
         self.model_loaded = True
@@ -273,20 +257,6 @@ if __name__ == "__main__":
               'seed': 25,
               }
 
-
-    # config = {'nb_actions': cartpole.action_space.n,
-    #           'epsilon_min': 0.001,
-    #           'epsilon_max': 1.,
-    #           'epsilon_decay_period': 1000,
-    #           'epsilon_delay_decay': 20,
-    #           'learning_rate': 0.075879071,
-    #           'gamma': 0.90,
-    #           'buffer_size': int(1e5),
-    #           'batch_size': 56,
-    #           'nb_neurons': 41,
-    #           'seed': 87482658,
-    #           }
-
     nb_neurons = config['nb_neurons']
 
     DQN = torch.nn.Sequential(nn.Linear(state_dim, 256),
@@ -306,6 +276,6 @@ if __name__ == "__main__":
 
     scores = agent_best.train(cartpole, 210)
 
-    # agent_best.save()
+    agent_best.save()
 
 
